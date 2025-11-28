@@ -1,0 +1,194 @@
+---
+config:
+  layout: dagre
+---
+flowchart LR
+ subgraph PROBLEM["Problem Context & Requirements"]
+    direction TB
+        PC1["Before -&gt; After<br><br>Before: semi-automated, Milliseconds latency<br>After: fully automated, Microseconds latency"]
+        PC2["Core Requirements<br><br>• Performance: &lt;10ms end-to-end<br>• Reliability: 99.99% uptime<br>• Safety: 0% limit breaches<br>• Scale: 100K+ trades/day, 12+ exchanges<br>• Compliance: full audit trail<br>• Flexibility: multi-strategy, per-symbol config"]
+        PC3["Complexity Drivers<br><br>Infra: multi-exchange, nanosecond tuning,<br>distributed consistency, network resilience,<br>automation safety<br><br>Ops: 24/7 on-call, sub-minute response,<br>multi-env (sim-&gt;paper-&gt;prod), regulation"]
+  end
+ subgraph COLO["Colocated Bare-Metal<br>(Critical Path)"]
+    direction TB
+        MD["Market Data Ingest<br>(Solarflare OpenOnload, &lt;100μs)"]
+        SE["Strategy Engine<br>&lt;1ms decision<br>CPU-pinned core"]
+        OG["Order Gateways<br>Per-exchange adapters"]
+  end
+ subgraph AWS["AWS Cloud (Multi-AZ)<br>(Reliability Path)"]
+    direction TB
+        RS["MicroServices<br>(Lambda / S1-S3)<br>"]
+        EC["EC2 Metal"]
+        PM["MicroServices<br>(EKS / S4-S7)"]
+        QB["SQS FIFO<br>Event Bus"]
+        DB["RDS Aurora<br>Trades · Positions · Orders"]
+        AR["S3 Archive<br>Compliance + Audit Logs"]
+  end
+ subgraph ARCH["High-Level Hybrid Architecture"]
+    direction LR
+        EXCH["12+ Exchange Feeds<br>Binance · Coinbase · Gemini<br>WebSocket / REST / UDP"]
+        COLO
+        AWS
+        OBS["Observability Layer<br>Prometheus · Loki · Grafana<br>CloudWatch · AlertManager"]
+        EX["Exchanges"]
+  end
+ subgraph COLO_DETAIL["Colocated Infrastructure (US Equinix)"]
+    direction LR
+        HW["Hardware<br><br>• Intel Xeon W9-3495X (56c, 4.8GHz)<br>• 256GB DDR5 ECC<br>• 25Gbps SFP28 NIC<br>• 2x 3.2TB NVMe RAID0<br>• 80–150ns tick-to-trade"]
+        KT["Kernel Tuning<br><br>• Large RX/TX buffers<br>• NIC backlog tuning<br>• TCP tweaks (no SACK)<br>• Low-latency scheduler<br>• No swap, crash-on-oops"]
+        CPU["CPU Pinning<br><br>• Strategy on Core 3 only<br>• IRQs moved off Core 3<br>• Market data cores 0–2<br>• Gateways 4–7<br>• Monitoring core 8"]
+        SolarFlare["Solarflare OO Kernel Bypass<br><br>Packet path: NIC -&gt; App<br>Per-packet: 50–100μs -&gt; &lt;10μs<br>Savings: 40–90μs/trade"]
+  end
+ subgraph CLOUD_DETAIL["AWS Cloud Architecture"]
+    direction LR
+        EC2M["EC2 bare-metal<br><br>• AMD EPYC 9654 96c<br>• 25–100Gbps NIC<br>• 1–3μs NIC RTT"]
+        SRV["MicroServices<br><br>S1–S3: Lambda <br>S4–S7: EKS"]
+        BUS["SQS FIFO<br>Ordered events<br>14-day retention"]
+        PERSIST["RDS Aurora<br>TimescaleDB<br>S3 Archive"]
+        ECR["ECR<br>Container Registry"]
+  end
+ subgraph FLOW["Data Flow & Critical Path"]
+    direction TB
+        F0["0μs – Exchange<br>Publishes price update"]
+        F1["0–100μs – Colocated<br>Ingest -&gt; Buffer -&gt; Strategy"]
+        F2["100–500μs – Strategy<br>Greeks + Signal + Build Order"]
+        F3["Async – Risk Check<br>gRPC -&gt; Lambda<br>200–500ms, not blocking"]
+        F4["~1.5ms – Send Order<br>REST/WebSocket to exchange"]
+        F5["3–50ms – Exchange<br>Match + confirm"]
+        F6["Post-trade – Cloud<br>SQS -&gt; RDS -&gt; S3/Analytics"]
+        FB["Fallback &amp; Resilience<br><br>• Risk timeout -&gt; cached decision<br>• Exchange down -&gt; circuit breaker<br>• Position mismatch -&gt; manual review + stop"]
+  end
+ subgraph DEVOPS["DevOps & CI/CD Practices"]
+    direction LR
+        TESTPYR["Test Pyramid<br><br>• Simulation (replay, 90% bugs)<br>• Paper trading (10%)<br>• Production (<1%)"]
+        PIPE["CI/CD Pipeline<br><br>1) Lint + unit tests<br>2) Integration tests<br>3) Replay tests<br>4) Security scans<br>5) Build &amp; push images<br>6) Staging deploy + smoke<br>7) Prod blue/green + auto-rollback"]
+        IAC["Infrastructure as Code<br><br>• Terraform: VPC, RDS, Lambda, IAM<br>• Ansible: kernel/DPDK/monitoring<br>• Staging ≈ Production<br>• DR: rebuild in ~30 min"]
+  end
+ subgraph SRE_SEC["SRE & Security"]
+    direction LR
+        OBS2["Observability<br><br>• Prometheus/Loki metrics &amp; logs<br>• Grafana dashboards<br>• P99 latency, error rates, business KPIs"]
+        IR["Incident Response (MTTR 15–30m)<br><br>Alert -&gt; Investigate -&gt; Fix -&gt; Deploy -&gt; Recover<br>Dashboards + runbooks + circuit breakers<br>Auto-rollback on bad deploys"]
+        SEC_LAYERS["Security (5 Layers)<br><br>1) Auth: OIDC, temp roles, key rotation<br>2) AuthZ: IAM least-privilege, SGs, NACLs<br>3) Data: KMS, TLS 1.3, S3 versioning<br>4) App: gRPC+mTLS, rate limits, non-root<br>5) Audit: CloudTrail, VPC Flow Logs, 10B+ entries"]
+  end
+ subgraph LESSONS["Lessons Learned & Principles"]
+    direction TB
+        LW["What Went Well<br><br>• Colocated + AWS split<br>• Strong observability<br>• IaC everywhere<br>• Testing pyramid<br>• Automation over heroics"]
+        LI["Improvements Needed<br><br>• More chaos engineering<br>• Better blast-radius isolation<br>• Dedicated SRE rotation<br>• Microservice design from day 1"]
+        PRINC["Core Principles<br><br>1) Observability first<br>2) Idempotency by default<br>3) Automation over heroics<br>4) Design for failure<br>5) Separation of concerns<br>6) Security in layers"]
+  end
+ subgraph ETHER["Ether.fi Connection"]
+    direction TB
+        MAP["Problem Parallels<br><br>• Money in motion (trading &lt;-&gt; staking)<br>• Multi-system coordination (exchanges &lt;-&gt; chains/protocols)<br>• Settlement &amp; slashing risk<br>• Regulatory &amp; user trust"]
+        PAT["Reusable Patterns<br><br>• Hybrid Architecture<br>• Idempotent ops<br>• On-chain + off-chain observability<br>• IaC + automated incident response"]
+        TECH["Shared Tech Stack<br><br>AWS · Terraform · GitHub Actions<br>Observability<br> microservices"]
+  end
+    P0["Problem<br>Context"] --> P1["Hybrid<br>Architecture"] & PROBLEM
+    P1 --> P2["Colocated<br>Infra"] & ARCH
+    P2 --> P3["AWS Cloud<br>Infra"] & COLO_DETAIL
+    P3 --> P4["DevOps &amp;<br>CI/CD"] & CLOUD_DETAIL
+    P4 --> P5["SRE &amp;<br>Security"] & FLOW & DEVOPS
+    P5 --> P6["Lessons<br>&amp; Principles"] & SRE_SEC
+    P6 --> P7["Ether.fi<br>Connection"] & LESSONS
+    P7 --> P8["Q&A"] & ETHER
+    DEVOPS --> ECR
+    ECR --> SRV
+    PC1 --> PC2
+    PC2 --> PC3
+    MD --> SE
+    SE --> OG
+    OG --> EX
+    EC --> EX & RS & PM
+    RS --> QB
+    QB --> DB
+    DB --> AR
+    PM --> DB
+    EXCH --> COLO
+    COLO --> AWS & OBS
+    AWS --> OBS
+    HW --> KT
+    KT --> CPU
+    CPU --> SolarFlare
+    EC2M --> SRV
+    SRV --> BUS
+    BUS --> PERSIST
+    F0 --> F1
+    F1 --> F2
+    F2 --> F3
+    F3 --> F4
+    F4 --> F5
+    F5 --> F6
+    F3 -.-> FB
+    F5 -.-> FB
+    TESTPYR --> PIPE
+    PIPE --> IAC
+    OBS2 --> IR
+    IR --> SEC_LAYERS
+    LW --> LI
+    LI --> PRINC
+    MAP --> PAT
+    PAT --> TECH
+    P8 --> QA["Q&amp;A<br><br>Dive deeper into any layer:<br>• Latency path<br>• Cloud services<br>• CI/CD<br>• SRE/Incidents<br>• Security model<br>• Ether.fi mapping"]
+
+     PC1:::neutral
+     PC2:::neutral
+     PC3:::neutral
+     MD:::infra
+     SE:::infra
+     OG:::infra
+     RS:::cloud
+     EC:::cloud
+     PM:::cloud
+     QB:::cloud
+     DB:::cloud
+     AR:::cloud
+     EXCH:::neutral
+     OBS:::devops
+     EX:::neutral
+     HW:::infra
+     KT:::infra
+     CPU:::infra
+     SolarFlare:::infra
+     EC2M:::cloud
+     SRV:::cloud
+     BUS:::cloud
+     PERSIST:::cloud
+     ECR:::cloud
+     F0:::neutral
+     F1:::infra
+     F2:::infra
+     F3:::cloud
+     F4:::infra
+     F5:::neutral
+     F6:::cloud
+     FB:::sre
+     TESTPYR:::devops
+     PIPE:::devops
+     IAC:::devops
+     OBS2:::sre
+     IR:::sre
+     SEC_LAYERS:::sec
+     LW:::neutral
+     LI:::neutral
+     PRINC:::neutral
+     MAP:::out
+     PAT:::out
+     TECH:::out
+     P0:::header
+     P1:::header
+     P2:::header
+     P3:::header
+     P4:::header
+     P5:::header
+     P6:::header
+     P7:::header
+     P8:::header
+     QA:::header
+    classDef header fill:#111827,stroke:#111827,color:#F9FAFB,font-weight:bold
+    classDef main fill:#0EA5E9,stroke:#0369A1,color:#F9FAFB
+    classDef infra fill:#22C55E,stroke:#15803D,color:#052e16
+    classDef cloud fill:#FACC15,stroke:#CA8A04,color:#422006
+    classDef devops fill:#A855F7,stroke:#7C3AED,color:#F9FAFB
+    classDef sre fill:#F97316,stroke:#EA580C,color:#431407
+    classDef sec fill:#FB7185,stroke:#E11D48,color:#450A0A
+    classDef neutral fill:#E5E7EB,stroke:#9CA3AF,color:#111827
+    classDef out fill:#111827,stroke:#111827,color:#F9FAFB
